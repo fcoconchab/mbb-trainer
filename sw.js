@@ -3,7 +3,7 @@
    Offline-first. Precaches the app shell; runtime-caches fonts.
    Bump CACHE_VERSION whenever index.html changes to force update.
    ============================================================ */
-const CACHE_VERSION = 'mbb-trainer-v4';
+const CACHE_VERSION = 'mbb-trainer-v5';
 const CORE_CACHE = CACHE_VERSION + '-core';
 const RUNTIME_CACHE = CACHE_VERSION + '-runtime';
 
