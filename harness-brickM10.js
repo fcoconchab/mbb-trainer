@@ -9,8 +9,8 @@ const vm = require('vm');
 const cp = require('child_process');
 
 const raw = fs.readFileSync('./index.html', 'utf8');
-const ANCHOR = 'renderDashboard();\n\n})();';
-if (raw.split(ANCHOR).length !== 2) { console.error('ANCLA DEL HOOK NO UNICA'); process.exit(1); }
+const ANCHOR_RE = /renderDashboard\(\);\r?\n\r?\n\}\)\(\);/;
+if ((raw.match(ANCHOR_RE) || []).length !== 1) { console.error('ANCLA DEL HOOK NO UNICA'); process.exit(1); }
 const HOOK = `renderDashboard();
 
   window.__TEST__ = {
@@ -42,7 +42,7 @@ const HOOK = `renderDashboard();
   };
 
 })();`;
-const hooked = raw.replace(ANCHOR, HOOK);
+const hooked = raw.replace(ANCHOR_RE, HOOK);
 const script = Array.from(hooked.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)).map(m => m[1]).join('\n');
 
 const EXPECTED_M10_COUNT = 14; // 13 markers reales + 1 falso positivo SVG: path "M10 3v6"

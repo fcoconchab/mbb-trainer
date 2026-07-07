@@ -3098,6 +3098,51 @@ textarea.amb-ta { min-height: 0; }   /* live-textarea trae min-height alto; acá
   min-width: 40px;
   text-align: right;
 }
+.trend-block-title {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  margin: var(--sp-3) 0 var(--sp-2);
+}
+.trend-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: var(--sp-3);
+  align-items: center;
+  padding: 10px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  margin-bottom: var(--sp-2);
+}
+.trend-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-1);
+}
+.trend-meta {
+  margin-top: 3px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-3);
+}
+.trend-sparkline {
+  width: 92px;
+  height: 28px;
+}
+.trend-delta {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  min-width: 74px;
+  text-align: right;
+}
+.trend-delta.up { color: var(--emerald); }
+.trend-delta.down { color: var(--red); }
+.trend-delta.flat, .trend-delta.insufficient { color: var(--text-3); }
 
 .reset-zone {
   margin-top: var(--sp-6);
@@ -13330,6 +13375,76 @@ textarea.amb-ta { min-height: 0; }   /* live-textarea trae min-height alto; acá
     if(acc <  0.7 && !fast) return { label: 'lento e impreciso',     cls: 'tag-bad'  };
     return { label: 'sólido', cls: 'tag-ok' };
   }
+  // M19 — helpers puros de tendencia para Progress. Derivan solo desde la
+  // ventana disponible: stepStats rolling-20 y mathTimes rolling-30.
+  function trendMean(arr) {
+    if (!Array.isArray(arr) || !arr.length) return null;
+    return arr.reduce((a, b) => a + b, 0) / arr.length;
+  }
+  function rollingMeanSeries(arr, size) {
+    const out = [];
+    const w = Math.max(1, size || 5);
+    for (let i = 0; i < (arr || []).length; i++) {
+      const s = arr.slice(Math.max(0, i - w + 1), i + 1);
+      out.push(trendMean(s));
+    }
+    return out;
+  }
+  function computeAccuracyTrend(entries) {
+    const vals = (Array.isArray(entries) ? entries : [])
+      .filter(e => e && typeof e.correct === 'boolean')
+      .map(e => e.correct ? 1 : 0);
+    const n = vals.length;
+    if (n < 3) return { kind: 'insufficient', n: n, rate: null, points: [], hasDelta: false, direction: 'insufficient' };
+    const rate = trendMean(vals);
+    const points = rollingMeanSeries(vals, 5);
+    let delta = null, direction = 'flat';
+    if (n >= 6) {
+      const prev = trendMean(vals.slice(-6, -3));
+      const recent = trendMean(vals.slice(-3));
+      delta = recent - prev;
+      direction = delta > 0.001 ? 'up' : (delta < -0.001 ? 'down' : 'flat');
+    }
+    return { kind: 'accuracy', n: n, rate: rate, points: points, hasDelta: n >= 6, delta: delta, direction: direction };
+  }
+  function computeTimeTrend(times) {
+    const vals = (Array.isArray(times) ? times : []).filter(v => typeof v === 'number' && isFinite(v) && v > 0);
+    const n = vals.length;
+    if (n < 3) return { kind: 'insufficient', n: n, median: null, points: [], hasDelta: false, direction: 'insufficient', orderedBy: 'rep' };
+    const median = mathMedian(vals);
+    let delta = null, direction = 'flat';
+    if (n >= 6) {
+      const prev = mathMedian(vals.slice(-6, -3));
+      const recent = mathMedian(vals.slice(-3));
+      delta = recent - prev;
+      direction = delta < -0.001 ? 'up' : (delta > 0.001 ? 'down' : 'flat');  // menor tiempo = mejora
+    }
+    return { kind: 'time', n: n, median: median, points: vals.slice(), hasDelta: n >= 6, delta: delta, direction: direction, orderedBy: 'rep' };
+  }
+  function trendSparklineSVG(points, options) {
+    options = options || {};
+    const vals = (Array.isArray(points) ? points : []).filter(v => typeof v === 'number' && isFinite(v));
+    const W = options.width || 92, H = options.height || 28, P = 3;
+    if (vals.length < 2) {
+      return '<svg class="trend-sparkline empty" viewBox="0 0 '+W+' '+H+'" aria-hidden="true"><line x1="'+P+'" y1="'+(H/2)+'" x2="'+(W-P)+'" y2="'+(H/2)+'" stroke="var(--border-mid)" stroke-dasharray="3 3"/></svg>';
+    }
+    const min = Math.min.apply(null, vals), max = Math.max.apply(null, vals), span = max - min;
+    const lowerIsBetter = !!options.lowerIsBetter;
+    const stroke = options.stroke || 'var(--gold)';
+    const coords = vals.map(function (v, i) {
+      const x = P + (W - P * 2) * (vals.length === 1 ? 0 : i / (vals.length - 1));
+      const t = span === 0 ? 0.5 : (v - min) / span;
+      const yNorm = lowerIsBetter ? t : (1 - t);
+      const y = P + (H - P * 2) * yNorm;
+      return [x, y];
+    });
+    const pts = coords.map(p => p[0].toFixed(1)+','+p[1].toFixed(1)).join(' ');
+    const last = coords[coords.length - 1];
+    return '<svg class="trend-sparkline" viewBox="0 0 '+W+' '+H+'" aria-hidden="true">'
+      + '<polyline points="'+pts+'" fill="none" stroke="'+stroke+'" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>'
+      + '<circle cx="'+last[0].toFixed(1)+'" cy="'+last[1].toFixed(1)+'" r="2.2" fill="'+stroke+'"/>'
+      + '</svg>';
+  }
   // Total de intentos registrados en el radar (para detectar el estado "sin datos").
   function mathPatsTotal() {
     let n = 0; const mp = state.mathPats || {};
@@ -15566,6 +15681,77 @@ textarea.amb-ta { min-height: 0; }   /* live-textarea trae min-height alto; acá
     return weakest;
   }
 
+  function trendPctLabel(v) {
+    return Math.round((v || 0) * 100) + '%';
+  }
+  function trendPpLabel(delta) {
+    const pp = Math.round((delta || 0) * 100);
+    return (pp > 0 ? '+' : '') + pp + 'pp';
+  }
+  function trendSecLabel(delta) {
+    const v = Math.round(Math.abs(delta || 0) * 10) / 10;
+    return v + 's';
+  }
+  function trendTone(direction) {
+    if (direction === 'up') return 'up';
+    if (direction === 'down') return 'down';
+    if (direction === 'insufficient') return 'insufficient';
+    return 'flat';
+  }
+  function renderTrendDelta(tr, type) {
+    const tone = trendTone(tr.direction);
+    if (!tr || tr.direction === 'insufficient') return '<div class="trend-delta insufficient">sin datos</div>';
+    if (!tr.hasDelta) return '<div class="trend-delta flat">n=' + tr.n + '</div>';
+    if (type === 'time') {
+      if (tr.direction === 'up') return '<div class="trend-delta up">mejora ' + trendSecLabel(tr.delta) + '</div>';
+      if (tr.direction === 'down') return '<div class="trend-delta down">sube ' + trendSecLabel(tr.delta) + '</div>';
+      return '<div class="trend-delta flat">plano</div>';
+    }
+    if (tr.direction === 'up') return '<div class="trend-delta up">' + trendPpLabel(tr.delta) + '</div>';
+    if (tr.direction === 'down') return '<div class="trend-delta down">' + trendPpLabel(tr.delta) + '</div>';
+    return '<div class="trend-delta flat">0pp</div>';
+  }
+  function renderSkillTrendRow(key) {
+    const entries = (state.stepStats && Array.isArray(state.stepStats[key])) ? state.stepStats[key] : [];
+    const tr = computeAccuracyTrend(entries);
+    const label = SKILL_LABELS[key] || key;
+    const spark = tr.hasDelta ? trendSparklineSVG(tr.points, { stroke: tr.direction === 'up' ? 'var(--emerald)' : (tr.direction === 'down' ? 'var(--red)' : 'var(--gold)') }) : '';
+    const meta = tr.n < 3
+      ? 'datos insuficientes · ' + tr.n + '/3 reps'
+      : (tr.n < 6
+        ? trendPctLabel(tr.rate) + ' accuracy · n=' + tr.n + ' · momentum reciente con 6 reps'
+        : trendPctLabel(tr.rate) + ' accuracy · últimas reps vs tramo anterior');
+    return '<div class="trend-row">'
+      + '<div><div class="trend-name">' + escapeHtml(label) + '</div><div class="trend-meta">' + escapeHtml(meta) + '</div></div>'
+      + '<div>' + spark + '</div>'
+      + renderTrendDelta(tr, 'accuracy')
+      + '</div>';
+  }
+  function renderMathTrendRow(p) {
+    const times = (state.mathTimes && Array.isArray(state.mathTimes[p])) ? state.mathTimes[p] : [];
+    const tr = computeTimeTrend(times);
+    const label = (MCMATH.PAT[p] && MCMATH.PAT[p].name) || p;
+    const spark = tr.hasDelta ? trendSparklineSVG(tr.points, { lowerIsBetter: true, stroke: tr.direction === 'up' ? 'var(--emerald)' : (tr.direction === 'down' ? 'var(--red)' : 'var(--gold)') }) : '';
+    const meta = tr.n < 3
+      ? 'datos insuficientes · ' + tr.n + '/3 tiempos'
+      : (tr.n < 6
+        ? 'mediana ' + tr.median + 's · n=' + tr.n
+        : 'mediana ' + tr.median + 's · últimos tiempos registrados, en orden de reps');
+    return '<div class="trend-row">'
+      + '<div><div class="trend-name">' + escapeHtml(label) + '</div><div class="trend-meta">' + escapeHtml(meta) + '</div></div>'
+      + '<div>' + spark + '</div>'
+      + renderTrendDelta(tr, 'time')
+      + '</div>';
+  }
+  function renderProgressTrends() {
+    const skillKeys = Object.keys(DEFAULT_STATE.stepStats);
+    return '<div class="progress-section-title">Tendencias</div>'
+      + '<div class="trend-block-title">Accuracy por skill · ventana disponible</div>'
+      + skillKeys.map(renderSkillTrendRow).join('')
+      + '<div class="trend-block-title">Tiempo por patrón math · últimos tiempos registrados</div>'
+      + SKILL_MATH_PATS.map(renderMathTrendRow).join('');
+  }
+
   function renderProgressBody() {
     const totalCases = (state.completedCases || []).length;
     const totalDrillsN = totalDrills();
@@ -15604,6 +15790,8 @@ textarea.amb-ta { min-height: 0; }   /* live-textarea trae min-height alto; acá
         </div>
       `;
     }
+
+    html += renderProgressTrends();
 
     // Framework mastery with branch breakdown
     html += `<div class="progress-section-title">Dominio de frameworks</div>`;
