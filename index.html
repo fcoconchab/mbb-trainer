@@ -2480,6 +2480,30 @@ textarea.amb-ta { min-height: 0; }   /* live-textarea trae min-height alto; acá
 }
 .mc-unitnote span { font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.06em; font-size: 9px; color: var(--text-2); }
 
+/* M10 — Protocolo P2R: gate de etiquetas antes del cálculo */
+.drill-hub-icon.protocolo { background: rgba(201,168,76,0.10); color: var(--gold); }
+.prot-slots { display: flex; flex-direction: column; gap: var(--sp-3); margin-bottom: var(--sp-3); }
+.prot-slot {
+  background: var(--bg-elevated); border: 1px solid var(--border-mid); border-radius: var(--r-md);
+  padding: var(--sp-3);
+}
+.prot-slot-label {
+  font-family: var(--font-mono); font-size: 9px; font-weight: 700; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--gold); margin-bottom: 5px;
+}
+.prot-slot-why { font-size: 11.5px; line-height: 1.45; color: var(--text-3); margin-bottom: 8px; }
+.prot-select {
+  width: 100%; min-height: 38px; border-radius: var(--r-md); border: 1px solid var(--border-mid);
+  background: var(--bg-input); color: var(--text-1); padding: 8px 10px; font: inherit; font-size: 12.5px;
+}
+.prot-feedback {
+  margin-bottom: var(--sp-3); padding: var(--sp-3); border-radius: var(--r-md);
+  font-size: 12px; line-height: 1.45;
+}
+.prot-feedback.ok { background: var(--emerald-bg); border: 1px solid rgba(34,197,94,0.24); color: var(--emerald); }
+.prot-feedback.bad { background: var(--red-bg); border: 1px solid rgba(239,68,68,0.24); color: var(--text-2); }
+.prot-feedback strong { color: var(--text-1); }
+
 /* ── Radar de patrones P1–P4 (colapsable) ── */
 .mc-radar-card {
   background: var(--bg-elevated);
@@ -4699,7 +4723,8 @@ textarea.amb-ta { min-height: 0; }   /* live-textarea trae min-height alto; acá
       builder: 0,
       sizing: 0,
       ambiguedad: 0,           // Brick C — drill "Ambigüedad 90s"
-      experimento: 0           // M3 — drill "Diseña el experimento"
+      experimento: 0,          // M3 — drill "Diseña el experimento"
+      protocolo: 0             // M10 — Protocolo P2R
     },
     // Step-level performance tracking for Dashboard insights (last 20 attempts per step)
     stepStats: {
@@ -4712,7 +4737,8 @@ textarea.amb-ta { min-height: 0; }   /* live-textarea trae min-height alto; acá
       ambiguedad: [],  // Brick C — apertura contra 90s (self-grade 3 ejes, suma ≥7 = correct)
       giro:       [],  // Brick J — reacción al giro del live (pass = ≥2 de 3 criterios)
       experimento: [], // M3 — diseño de experimento contra 3 min (6 piezas binarias, pass = ≥5/6)
-      fit:        []   // M9 — rep del gimnasio FIT (5 binarios: S/T/A/R + trampa evitada, pass = ≥4/5)
+      fit:        [],  // M9 — rep del gimnasio FIT (5 binarios: S/T/A/R + trampa evitada, pass = ≥4/5)
+      protocolo:  []   // M10 — Protocolo P2R (labels first-try + cálculo)
     },
     // Radar de patrones de error del case math (lifetime, persiste entre sesiones).
     // Acumula accuracy por patrón P1–P4 para el radar de vulnerabilidad.
@@ -5584,6 +5610,7 @@ textarea.amb-ta { min-height: 0; }   /* live-textarea trae min-height alto; acá
     ambiguedad: 'Ambigüedad', giro: 'Reacción al giro',
     experimento: 'Diseño de experimento',  // M3
     fit: 'FIT / Behavioral',               // M9 — entra al skill graph; FUERA de SDH_SKILL_DRILL a propósito (el gym es una pestaña, no un drill del hub → SdH no lo propone, patrón diagnose/clarifying)
+    protocolo: 'Protocolo P2R',            // M10 — drill standalone proponible por Sesión de Hoy
     P1: 'magnitud/ceros', P2D: 'división por fracción',
     P2R: 'tasas/base', P3: 'multi-paso', P4: 'división final/escala'
   };
@@ -5681,7 +5708,8 @@ textarea.amb-ta { min-height: 0; }   /* live-textarea trae min-height alto; acá
   const SDH_SKILL_DRILL = {
     ambiguedad: 'ambiguedad', synthesis: 'synthesis',
     hypothesis: 'hypothesis', mece: 'mece',
-    experimento: 'experimento'   // M3 — edición autorizada: skill 'experimento' → su drill
+    experimento: 'experimento',   // M3 — edición autorizada: skill 'experimento' → su drill
+    protocolo: 'protocolo'        // M10 — Protocolo P2R sí es drill standalone del hub
   };
 
   // Semilla YYYYMMDD en hora LOCAL — mismo día = misma semilla.
@@ -12460,6 +12488,65 @@ textarea.amb-ta { min-height: 0; }   /* live-textarea trae min-height alto; acá
   };
   })();
 
+  // M10 — P2R_LABELS vive fuera del IIFE MCMATH y solo lee la salida pública
+  // del generador: {type, legend[], ask}. Devuelve 2-4 slots enfocados en
+  // inputs confundibles P2R; jamás etiqueta toda la leyenda ni toca answers.
+  const P2R_LABELS = (function () {
+    function hay(s) {
+      return String(s || '').toLowerCase();
+    }
+    function rowText(r) {
+      return hay((r && r.l) + ' ' + (r && r.v) + ' ' + (r && r.s) + ' ' + (r && r.p));
+    }
+    function findIdx(legend, tests, used) {
+      for (let i = 0; i < (legend || []).length; i++) {
+        if (used && used[i]) continue;
+        const txt = rowText(legend[i]);
+        if (tests.every(t => txt.indexOf(hay(t)) >= 0)) return i;
+      }
+      return -1;
+    }
+    function add(out, legend, used, id, label, tests, why) {
+      const idx = findIdx(legend, tests, used);
+      if (idx < 0) return;
+      used[idx] = true;
+      out.push({ id: id, label: label, legendIndex: idx, why: why });
+    }
+    function targetSegment(d) {
+      const m = String(d && d.ask || '').match(/segmento\s+(.+?)\s+en un año/i);
+      return m ? m[1] : '';
+    }
+    function forDrill(d) {
+      const legend = (d && Array.isArray(d.legend)) ? d.legend : [];
+      const used = {};
+      const out = [];
+      if (!legend.length || !d || P2R_PROTOCOL_TYPES.indexOf(d.type) === -1) return out;
+
+      if (d.type === 'tasas') {
+        const seg = targetSegment(d);
+        add(out, legend, used, 'base', 'Base del segmento objetivo', ['clientes', seg || 'clientes'], 'Primero fija qué segmento estás calculando; no arrastres la base del otro segmento.');
+        add(out, legend, used, 'revolving', 'Tasa revolving correcta', ['% que revuelve', seg || 'revuelve'], 'Esta tasa pertenece al segmento objetivo; es la caja que suele cruzarse.');
+        add(out, legend, used, 'interest', 'Tasa de interés anual', ['tasa de interés'], 'La tasa anual se aplica después de aislar la base revolvente correcta.');
+      } else if (d.type === 'loyalty') {
+        add(out, legend, used, 'base', 'Base elegible del programa', ['gasto elegible'], 'La base son los dólares elegibles, no todos los puntos como costo automático.');
+        add(out, legend, used, 'redemption', 'Tasa que sí genera costo', ['tasa de redención'], 'Solo los puntos redimidos generan costo.');
+        add(out, legend, used, 'breakage', 'Tasa que NO genera costo', ['breakage'], 'Breakage es el complemento que expira; no lo uses como redención.');
+      } else if (d.type === 'mix') {
+        add(out, legend, used, 'rate-a', 'Tasa del producto A', ['take rate'], 'Cada producto conserva su tasa; el cambio viene del peso.');
+        add(out, legend, used, 'rate-b', 'Tasa del producto B', ['take rate'], 'No promedies simple: las tasas viven en productos distintos.');
+        add(out, legend, used, 'projected-mix', 'Mix proyectado como peso', ['mix proyectado'], 'El blended pedido usa el mix futuro, no el de hoy.');
+        add(out, legend, used, 'base', 'GDV / base de volumen', ['gdv'], 'Solo entra si la pregunta pide impacto en revenue.');
+      } else if (d.type === 'percliente') {
+        add(out, legend, used, 'spend', 'Gasto/base anual', ['gasto con la tarjeta'], 'Convierte la base mensual a anual antes de aplicar tasas.');
+        add(out, legend, used, 'interchange', 'Tasa de interchange', ['tasa de interchange'], 'Interchange aplica sobre el gasto anual.');
+        add(out, legend, used, 'interest', 'Tasa de interés anual', ['tasa de interés'], 'Interés se aplica solo a la parte revolvente.');
+        add(out, legend, used, 'revolver', 'Dato para derivar revolvente', ['clientes que pagan a tiempo'], 'No es la base del interés: la base revolvente es 1 menos este dato.');
+      }
+      return out.slice(0, 4);
+    }
+    return { forDrill: forDrill };
+  })();
+
   // MECE CHECK — given a breakdown, is it MECE? If not, why?
   const MECE_DRILLS = [
     {
@@ -13130,6 +13217,16 @@ textarea.amb-ta { min-height: 0; }   /* live-textarea trae min-height alto; acá
     }
   ];
 
+  // M10 — Protocolo P2R: drill standalone del hub. Cada entrada apunta a un
+  // generador público de MCMATH; el ejercicio numérico se congela al abrir el detail.
+  const P2R_PROTOCOL_TYPES = ['tasas', 'loyalty', 'mix', 'percliente'];
+  const PROTOCOL_DRILLS = [
+    { p2rType: 'tasas',      prompt: 'Etiqueta base, tasa revolving e interés antes de calcular.' },
+    { p2rType: 'loyalty',    prompt: 'Separa redención que cuesta de breakage que no cuesta.' },
+    { p2rType: 'mix',        prompt: 'Fija tasas por producto, mix proyectado y base de volumen.' },
+    { p2rType: 'percliente', prompt: 'Deriva la base revolvente antes de sumar economía por cliente.' }
+  ];
+
   const DRILL_TYPES = {
     hypothesis: { label: 'Hipótesis',  drills: HYPOTHESIS_DRILLS,  stateKey: 'hypothesis' },
     math:       { label: 'Case Math',   drills: [],                 stateKey: 'math', generated: true },
@@ -13138,7 +13235,8 @@ textarea.amb-ta { min-height: 0; }   /* live-textarea trae min-height alto; acá
     builder:    { label: 'Arma un árbol',drills: BUILDER_DRILLS,     stateKey: 'builder'    },
     sizing:     { label: 'Market Sizing',drills: SIZING_DRILLS,     stateKey: 'sizing'     },
     ambiguedad: { label: 'Ambigüedad 90s', drills: AMBIGUITY_DRILLS, stateKey: 'ambiguedad' },
-    experimento: { label: 'Diseña el experimento', drills: EXPERIMENT_DRILLS, stateKey: 'experimento' }   // M3
+    experimento: { label: 'Diseña el experimento', drills: EXPERIMENT_DRILLS, stateKey: 'experimento' },   // M3
+    protocolo:  { label: 'Protocolo P2R', drills: PROTOCOL_DRILLS, stateKey: 'protocolo' }   // M10
   };
 
   let drillsMounted = false;
@@ -13304,6 +13402,31 @@ textarea.amb-ta { min-height: 0; }   /* live-textarea trae min-height alto; acá
     return arr;
   }
 
+  function ensureProtocolRep() {
+    const src = (DRILL_TYPES.protocolo.drills || [])[drillsState.drillIdx] || PROTOCOL_DRILLS[0];
+    const srcType = src && src.p2rType;
+    if (!drillsState.protDrill || drillsState.protSourceIdx !== drillsState.drillIdx || drillsState.protSourceType !== srcType) {
+      const lv = srcType === 'tasas' ? 1 : 2;   // tasas lv1 fuerza un segmento objetivo, no total
+      let d = null, slots = [];
+      for (let tries = 0; tries < 4 && slots.length < 2; tries++) {
+        d = MCMATH.gen(srcType, lv);
+        slots = P2R_LABELS.forDrill(d);
+      }
+      drillsState.protSourceIdx = drillsState.drillIdx;
+      drillsState.protSourceType = srcType;
+      drillsState.protDrill = d;
+      drillsState.protSlots = slots;
+      drillsState.protLabelPicks = {};
+      drillsState.protLabelsChecked = false;
+      drillsState.protLabelsOK = false;
+      drillsState.protLabelsFirstTry = true;
+      drillsState.protValue = '';
+      drillsState.protResult = null;
+      drillsState.protCommitted = false;
+    }
+    return drillsState.protDrill;
+  }
+
   // ── Brick C: timer de 90s del drill de Ambigüedad ──
   // Countdown visible desde que se abre el drill; a 0 marca "fuera de tiempo" (rojo)
   // pero NO bloquea escribir ni revela solo — en entrevista seguirías hablando.
@@ -13383,6 +13506,7 @@ textarea.amb-ta { min-height: 0; }   /* live-textarea trae min-height alto; acá
     if (!drillsMounted) {
       root.addEventListener('click', handleDrillsClick);
       root.addEventListener('input', handleDrillsInput);
+      root.addEventListener('change', handleDrillsInput);
       root.addEventListener('keydown', handleDrillsKeydown);
       drillsMounted = true;
     }
@@ -13419,7 +13543,9 @@ textarea.amb-ta { min-height: 0; }   /* live-textarea trae min-height alto; acá
       { key: 'ambiguedad', title: 'Ambigüedad 90s',      iconSvg: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
         desc: 'Prompt vago → escribe objetivo + éxito + 3 ramas contra 90 segundos. Producción, no reconocimiento.' },
       { key: 'experimento', title: 'Diseña el experimento', iconSvg: '<path d="M9 3h6"/><path d="M10 3v6l-4.5 8.5A2 2 0 0 0 7.3 21h9.4a2 2 0 0 0 1.8-3.5L14 9V3"/><line x1="8" y1="15" x2="16" y2="15"/>',
-        desc: 'Situación de negocio → produce las 6 piezas del diseño Test & Learn contra 3 minutos.' }
+        desc: 'Situación de negocio → produce las 6 piezas del diseño Test & Learn contra 3 minutos.' },
+      { key: 'protocolo', title: 'Protocolo P2R', iconSvg: '<path d="M4 7h16"/><path d="M4 12h16"/><path d="M4 17h10"/><circle cx="18" cy="17" r="2"/>',
+        desc: 'Etiqueta las bases y tasas confundibles antes de liberar el cálculo.' }
     ];
     return `
       <div class="cases-header">
@@ -13488,6 +13614,7 @@ textarea.amb-ta { min-height: 0; }   /* live-textarea trae min-height alto; acá
       case 'sizing':     body = renderSizingDrill(drill);     break;
       case 'ambiguedad': body = renderAmbiguityDrill(drill);  break;
       case 'experimento': body = renderExperimentDrill(drill); break;   // M3
+      case 'protocolo':  body = renderProtocolDrill(drill);    break;   // M10
     }
 
     const backAction = gen ? 'drill-back-to-hub' : 'drill-back-to-list';
@@ -13754,6 +13881,85 @@ textarea.amb-ta { min-height: 0; }   /* live-textarea trae min-height alto; acá
       if (!isCorrect) {
         html += `<button class="reveal-btn" data-action="drill-retry">Reintentar</button>`;
       }
+    }
+    return html;
+  }
+
+  // ---- M10 · PROTOCOLO P2R drill body ----
+  function renderProtocolDrill(srcDrill) {
+    const s = drillsState;
+    const d = ensureProtocolRep();
+    const slots = s.protSlots || [];
+    const picks = s.protLabelPicks || {};
+    const labelsReady = slots.length > 0 && slots.every(slot => picks[slot.id] !== undefined && picks[slot.id] !== '');
+    const labelsOK = !!s.protLabelsOK;
+    const submitted = !!(s.protResult && s.protResult.submitted);
+    const ansDisplay = d ? MCMATH.fmtAns(d.answer, d.kind) : '';
+    const sourceLabel = srcDrill && srcDrill.prompt ? srcDrill.prompt : 'Etiqueta antes de calcular.';
+
+    let html = `
+      <div class="drill-prompt-card">
+        <div class="drill-prompt-label">Protocolo P2R · ${d && d.eyebrow ? escapeHtml(d.eyebrow) : 'tasas/base'}</div>
+        <div class="drill-prompt-text">${escapeHtml(d ? d.scenario : sourceLabel)}</div>
+      </div>
+      ${d && d.legend ? mcLegendHTML(d.legend) : ''}
+      ${d && d.ask ? `<div class="mc-ask">${escapeHtml(d.ask)}</div>` : ''}
+      ${d && d.unitNote ? `<div class="mc-unitnote"><span>Responde en:</span> ${escapeHtml(d.unitNote)}</div>` : ''}
+      <div class="drill-task"><strong>Fase 1:</strong> etiqueta las bases y tasas confundibles. El cálculo se libera solo cuando el protocolo está correcto.</div>
+      <div class="prot-slots">
+        ${slots.map(slot => {
+          const pick = picks[slot.id] !== undefined ? String(picks[slot.id]) : '';
+          return `
+            <div class="prot-slot">
+              <div class="prot-slot-label">${escapeHtml(slot.label)}</div>
+              <div class="prot-slot-why">${escapeHtml(slot.why)}</div>
+              <select class="prot-select" data-role="prot-label" data-slot="${escapeHtml(slot.id)}" ${labelsOK || submitted ? 'disabled' : ''}>
+                <option value="">Elige un dato de la leyenda</option>
+                ${(d.legend || []).map((r, i) => `<option value="${i}" ${pick === String(i) ? 'selected' : ''}>${escapeHtml(r.l)} · ${escapeHtml(r.v)}</option>`).join('')}
+              </select>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `;
+
+    if (!labelsOK && s.protLabelsChecked) {
+      const wrong = slots.filter(slot => String(picks[slot.id]) !== String(slot.legendIndex)).length;
+      html += `<div class="prot-feedback bad"><strong>${wrong || 'Alguna'} etiqueta fuera de caja.</strong> Revisa el alcance de cada tasa/base y vuelve a comprobar antes de calcular.</div>`;
+    }
+    if (labelsOK) {
+      html += `<div class="prot-feedback ok"><strong>Gate abierto.</strong> Las etiquetas P2R están alineadas; ahora calcula sin cambiar de base.</div>`;
+    }
+    if (!labelsOK) {
+      html += `<button class="reveal-btn" data-action="prot-label-check" ${labelsReady && !submitted ? '' : 'disabled'}>Comprobar etiquetas</button>`;
+    } else if (!submitted) {
+      html += `
+        <div class="drill-task"><strong>Fase 2:</strong> resuelve el cálculo numérico con las etiquetas ya fijadas.</div>
+        <div class="math-input-row">
+          <input type="text" class="math-input" data-role="prot-input" inputmode="decimal"
+                 placeholder="Tu respuesta" value="${escapeHtml(s.protValue || '')}">
+          <button class="math-submit" data-action="prot-submit" ${(s.protValue || '').trim() ? '' : 'disabled'}>Verificar</button>
+        </div>
+      `;
+    }
+    if (submitted && s.protResult) {
+      const pass = !!s.protResult.pass;
+      const calcOK = !!s.protResult.calcOK;
+      html += `
+        <div class="drill-verdict ${pass ? 'correct' : 'incorrect'}">
+          <div class="drill-verdict-icon">${pass ? '✓' : '×'}</div>
+          <div class="drill-verdict-label">${pass ? 'Protocolo limpio' : (calcOK ? 'Cálculo OK, protocolo tardío' : 'Revisa el cálculo')}</div>
+        </div>
+        <div class="feedback-block show ${pass ? 'strong' : 'weak'}" style="display:block;margin-bottom:var(--sp-3)">
+          <div class="feedback-title">Fase 3 · Feedback final</div>
+          <div class="feedback-body">${pass ? 'Etiquetaste bien en el primer intento y calculaste correctamente.' : (calcOK ? 'El número está bien, pero las etiquetas no salieron correctas en el primer intento: para P2R eso cuenta como fallo de protocolo.' : 'Las etiquetas ya estaban correctas; el fallo quedó en la ejecución numérica.')}</div>
+        </div>
+        <div class="math-working">
+          <div class="math-working-label">Ledger paso a paso</div>
+          ${String(d.steps || '').split('\n').map(step => `<div class="math-working-step">${escapeHtml(step)}</div>`).join('')}
+          <div class="math-working-answer">Respuesta: ${escapeHtml(ansDisplay)}</div>
+        </div>
+      `;
     }
     return html;
   }
@@ -14182,6 +14388,18 @@ textarea.amb-ta { min-height: 0; }   /* live-textarea trae min-height alto; acá
     drillsState.expGraded = false;
     drillsState.expStartMs = 0;      // el reloj de 3:00 parte cuando el detail se pinta (startExpTimer), no acá
     drillsState.expTimeUsed = null;
+    // M10 — Protocolo P2R: todo efímero; abandono pre-submit = cero señal persistente
+    drillsState.protSourceIdx = null;
+    drillsState.protSourceType = null;
+    drillsState.protDrill = null;
+    drillsState.protSlots = [];
+    drillsState.protLabelPicks = {};
+    drillsState.protLabelsChecked = false;
+    drillsState.protLabelsOK = false;
+    drillsState.protLabelsFirstTry = true;
+    drillsState.protValue = '';
+    drillsState.protResult = null;
+    drillsState.protCommitted = false;
   }
 
   function handleDrillsClick(e) {
@@ -14313,6 +14531,40 @@ textarea.amb-ta { min-height: 0; }   /* live-textarea trae min-height alto; acá
       const p = target.dataset.pat;
       if (!p || drillsState.trapOpts.indexOf(p) === -1) return;
       drillsState.trapPick = p;
+      renderDrills();
+      return;
+    }
+    if (action === 'prot-label-check') {
+      if (drillsState.type !== 'protocolo' || drillsState.protCommitted) return;
+      ensureProtocolRep();
+      const slots = drillsState.protSlots || [];
+      const picks = drillsState.protLabelPicks || {};
+      const ready = slots.length > 0 && slots.every(slot => picks[slot.id] !== undefined && picks[slot.id] !== '');
+      if (!ready) return;
+      const ok = slots.every(slot => String(picks[slot.id]) === String(slot.legendIndex));
+      drillsState.protLabelsChecked = true;
+      drillsState.protLabelsOK = ok;
+      if (!ok) drillsState.protLabelsFirstTry = false;
+      renderDrills();
+      return;
+    }
+    if (action === 'prot-submit') {
+      if (drillsState.type !== 'protocolo' || drillsState.protCommitted || !drillsState.protLabelsOK) return;
+      const d = ensureProtocolRep();
+      const parsed = MCMATH.parseAns(drillsState.protValue);
+      const calcOK = MCMATH.tolOK(parsed, d.answer, d.kind);
+      const pass = !!drillsState.protLabelsFirstTry && !!calcOK;
+      drillsState.protCommitted = true;
+      drillsState.protResult = { submitted: true, calcOK: calcOK, pass: pass };
+      if (!state.drillHistory) state.drillHistory = {};
+      state.drillHistory.protocolo = (state.drillHistory.protocolo || 0) + 1;
+      if (pass) {
+        if (!state.drillCompletions) state.drillCompletions = {};
+        if (!state.drillCompletions.protocolo) state.drillCompletions.protocolo = {};
+        state.drillCompletions.protocolo[drillsState.drillIdx] = true;
+      }
+      registerSession();
+      recordStepStat('protocolo', pass);
       renderDrills();
       return;
     }
@@ -14504,6 +14756,22 @@ textarea.amb-ta { min-height: 0; }   /* live-textarea trae min-height alto; acá
       const submit = document.querySelector('[data-action="sizing-submit"]');
       if (submit) submit.disabled = (target.value.trim() === '' || drillsState.revealed);
     }
+    if (target && target.dataset && target.dataset.role === 'prot-label') {
+      if (!drillsState.protLabelPicks) drillsState.protLabelPicks = {};
+      drillsState.protLabelPicks[target.dataset.slot] = target.value;
+      drillsState.protLabelsChecked = false;
+      drillsState.protLabelsOK = false;
+      const slots = drillsState.protSlots || [];
+      const picks = drillsState.protLabelPicks || {};
+      const ready = slots.length > 0 && slots.every(slot => picks[slot.id] !== undefined && picks[slot.id] !== '');
+      const check = document.querySelector('[data-action="prot-label-check"]');
+      if (check) check.disabled = !ready || drillsState.protCommitted;
+    }
+    if (target && target.dataset && target.dataset.role === 'prot-input') {
+      drillsState.protValue = target.value;
+      const submit = document.querySelector('[data-action="prot-submit"]');
+      if (submit) submit.disabled = (target.value.trim() === '' || !drillsState.protLabelsOK || drillsState.protCommitted);
+    }
     // Brick C — Ambigüedad 90s: persistir lo tecleado en drillsState SIN re-render
     // (repintar acá se comería el foco del textarea — misma razón que math-input).
     const ambRole = target && target.dataset && target.dataset.role;
@@ -14528,6 +14796,11 @@ textarea.amb-ta { min-height: 0; }   /* live-textarea trae min-height alto; acá
     if (e.target && e.target.dataset && e.target.dataset.role === 'sizing-input' && e.key === 'Enter') {
       e.preventDefault();
       const submit = document.querySelector('[data-action="sizing-submit"]');
+      if (submit && !submit.disabled) submit.click();
+    }
+    if (e.target && e.target.dataset && e.target.dataset.role === 'prot-input' && e.key === 'Enter') {
+      e.preventDefault();
+      const submit = document.querySelector('[data-action="prot-submit"]');
       if (submit && !submit.disabled) submit.click();
     }
   }
@@ -15559,11 +15832,11 @@ textarea.amb-ta { min-height: 0; }   /* live-textarea trae min-height alto; acá
       state.completedCases = [];
       state.exhibitsCompleted = [];
       state.mastery = {};
-      state.drillHistory = { hypothesis: 0, math: 0, mece: 0, synthesis: 0, builder: 0, sizing: 0, ambiguedad: 0, experimento: 0 };  // M3
+      state.drillHistory = { hypothesis: 0, math: 0, mece: 0, synthesis: 0, builder: 0, sizing: 0, ambiguedad: 0, experimento: 0, protocolo: 0 };  // M3 · M10
       state.drillCompletions = {};
       state.lastRecall = {};
       state.srs = {};
-      state.stepStats = { diagnose:[], hypothesis:[], math:[], mece:[], synthesis:[], clarifying:[], ambiguedad:[], giro:[], experimento:[], fit:[] };  // M3 · M9
+      state.stepStats = { diagnose:[], hypothesis:[], math:[], mece:[], synthesis:[], clarifying:[], ambiguedad:[], giro:[], experimento:[], fit:[], protocolo:[] };  // M3 · M9 · M10
       state.mathPats = deepClone(DEFAULT_STATE.mathPats);
       state.mathTimes = deepClone(DEFAULT_STATE.mathTimes);
       state.synthLog = [];
