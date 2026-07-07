@@ -12,15 +12,15 @@
    end-to-end: plan del día elige experimento y el click abre el detail correcto ·
    M3-6 timer cleanup en las 3 salidas (reveal / volver a lista / switchTab) y
    convivencia con el timer amb · M3-7 abandono pre-grade y pre-reveal = cero
-   señal · M3-8 los otros 7 tipos intactos (keys, shapes, flujo amb arranca su
+   señal · M3-8 los otros 8 tipos intactos (keys, shapes, flujo amb arranca su
    timer). Los grep-counts de congelados van en bash. */
 const fs = require('fs');
 const { JSDOM } = require('jsdom');
 
 // ── build de la copia con hook ──
 const raw = fs.readFileSync('./index.html', 'utf8');
-const ANCHOR = 'renderDashboard();\n\n})();';
-if (raw.split(ANCHOR).length !== 2) { console.error('ANCLA DEL HOOK NO ÚNICA'); process.exit(1); }
+const ANCHOR_RE = /renderDashboard\(\);\r?\n\r?\n\}\)\(\);/;
+if ((raw.match(ANCHOR_RE) || []).length !== 1) { console.error('ANCLA DEL HOOK NO ÚNICA'); process.exit(1); }
 const HOOK = `renderDashboard();
 
   window.__TEST__ = {
@@ -36,7 +36,7 @@ const HOOK = `renderDashboard();
   };
 
 })();`;
-fs.writeFileSync('/tmp/test-index-m3.html', raw.replace(ANCHOR, HOOK));
+fs.writeFileSync('/tmp/test-index-m3.html', raw.replace(ANCHOR_RE, HOOK));
 const html = fs.readFileSync('/tmp/test-index-m3.html', 'utf8');
 
 let pass = 0, fail = 0;
@@ -189,7 +189,7 @@ console.log('M3-5 · SdH deep-linkea al drill de experimento');
   const good = () => [1, 2, 3].map(i => ({ correct: true, ts: i }));
   const pre = {
     stepStats: {
-      ambiguedad: good(), synthesis: good(), hypothesis: good(), mece: good(),
+      ambiguedad: good(), synthesis: good(), hypothesis: good(), mece: good(), protocolo: good(),
       experimento: [{ correct: false, ts: 1 }, { correct: false, ts: 2 }, { correct: false, ts: 3 }]
     }
   };
@@ -269,19 +269,19 @@ console.log('M3-7 · abandono pre-grade');
   b.dom.window.close();
 }
 
-// ════ M3-8 · los otros 7 tipos intactos ════
+// ════ M3-8 · los otros 8 tipos intactos ════
 console.log('M3-8 · tipos existentes intactos');
 {
   const { dom, w } = boot(null);
   const T = w.__TEST__;
   const keys = Object.keys(T.DRILL_TYPES);
-  t('8 tipos: los 7 originales + experimento',
-    keys.length === 8 && ['hypothesis', 'math', 'mece', 'synthesis', 'builder', 'sizing', 'ambiguedad', 'experimento'].every(k => keys.indexOf(k) >= 0));
+  t('9 tipos: los 7 originales + experimento + protocolo',
+    keys.length === 9 && ['hypothesis', 'math', 'mece', 'synthesis', 'builder', 'sizing', 'ambiguedad', 'experimento', 'protocolo'].every(k => keys.indexOf(k) >= 0));
   t('shapes originales intactos (label/stateKey; math sigue generated)',
     T.DRILL_TYPES.ambiguedad.stateKey === 'ambiguedad' && T.DRILL_TYPES.math.generated === true &&
     T.DRILL_TYPES.hypothesis.stateKey === 'hypothesis' && T.DRILL_TYPES.sizing.stateKey === 'sizing');
   w.MBB.switchTab('drills');
-  t('hub pinta 8 tiles', w.document.querySelectorAll('[data-action="drill-open-type"]').length === 8);
+  t('hub pinta 9 tiles', w.document.querySelectorAll('[data-action="drill-open-type"]').length === 9);
   // flujo amb sigue vivo end-to-end mínimo: abre y su timer corre
   click(w, '[data-action="drill-open-type"][data-type="ambiguedad"]');
   click(w, '[data-action="drill-open"][data-index="0"]');

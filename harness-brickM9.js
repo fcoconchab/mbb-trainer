@@ -21,8 +21,8 @@ const { JSDOM } = require('jsdom');
 
 // ── build de la copia con hook ──
 const raw = fs.readFileSync('./index.html', 'utf8');
-const ANCHOR = 'renderDashboard();\n\n})();';
-if (raw.split(ANCHOR).length !== 2) { console.error('ANCLA DEL HOOK NO ÚNICA'); process.exit(1); }
+const ANCHOR_RE = /renderDashboard\(\);\r?\n\r?\n\}\)\(\);/;
+if ((raw.match(ANCHOR_RE) || []).length !== 1) { console.error('ANCLA DEL HOOK NO ÚNICA'); process.exit(1); }
 const HOOK = `renderDashboard();
 
   window.__TEST__ = {
@@ -41,7 +41,7 @@ const HOOK = `renderDashboard();
   };
 
 })();`;
-fs.writeFileSync('/tmp/test-index-m9.html', raw.replace(ANCHOR, HOOK));
+fs.writeFileSync('/tmp/test-index-m9.html', raw.replace(ANCHOR_RE, HOOK));
 const html = fs.readFileSync('/tmp/test-index-m9.html', 'utf8');
 
 // sha256 de FIT_QUESTIONS en el checkpoint PRE-M9 (capturado antes de editar)
